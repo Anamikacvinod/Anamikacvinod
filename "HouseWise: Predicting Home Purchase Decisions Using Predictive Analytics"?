@@ -1,0 +1,520 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier, VotingClassifier
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression, LassoCV
+from sklearn.model_selection import GridSearchCV, cross_val_score
+from sklearn.model_selection import train_test_split
+from sklearn.svm import SVC
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.preprocessing import StandardScaler, LabelEncoder, OneHotEncoder
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+# Load the data
+pd.set_option('display.max_rows', 200)
+pd.options.mode.copy_on_write = True
+df_house_price = pd.read_csv('Ireland House Price Final (1).csv')
+print(df_house_price.info())
+print(df_house_price.describe())
+df_house_price['price-per-sqft-$'] = df_house_price['price-per-sqft-
+$'].apply(lambda x: round(x, 2))
+df_house_price = df_house_price.rename(columns={'price-per-sqft-$':
+'Price_per_squarefeet ($)'})
+# Function to clean the total squarefeet column.
+def clean_text(text):
+text = str(text)
+if '-' in text:
+temp = text.split('-')
+temp = [float(value.strip()) for value in temp]
+text = sum(temp) / 2
+if isinstance(text, str) and 'Sq. Meter' in text:
+text = text.replace('Sq. Meter', '').strip() # Remove 'sq. meter' and
+strip spaces
+return round(float(text) * 10.7639,
+2) # Convert sq. meter to sq. feet (1 square meter (Sq.
+Meter) = 10.7639 square feet)
+elif isinstance(text, str) and 'Sq. Yards' in text:
+text = text.replace('Sq. Yards', '').strip() # Remove 'sq. yard' and strip
+spaces
+return round(float(text) * 9, 2) # Convert Sq. Yard to Sq. feet (1 square
+yard (Sq. Yard) = 9 square feet)
+elif isinstance(text, str) and 'Acres' in text:
+text = text.replace('Acres', '').strip()
+return round(float(text) * 43560, 2) # Convert Acres to Sq. Feet (1 acre =
+43560 square feet)
+elif isinstance(text, str) and 'Cents' in text:
+text = float(text.replace('Cents', '').strip())
+return round(float(text) * 435.6, 2) # Convert Cents to Sq. Feet (1 cent =
+435.6 square feet)
+else:
+return round(float(text), 2) # Return the numeric value if no conversion
+needed
+# dropping columns with guntha/ground and perch.
+df_house_price = df_house_price[~df_house_price['total_sqft'].str.contains('ground|
+guntha|perch', case=False, na=False)]
+df_house_price['total_sqft'] = df_house_price['total_sqft'].apply(clean_text)
+df_house_price = df_house_price.rename(columns={'total_sqft': 'total_squarefeet'})
+# drop id
+df_house_price = df_house_price.drop('ID', axis=1)
+# Altering the date column to future availability.
+def categorize_availability(date):
+if date == "Ready To Move":
+return "Ready To Move"
+elif date == "Immediate Possession":
+return "Immediate Possession"
+else:
+return "Future Availability"
+# Apply the function to the availability column
+df_house_price['availability'] =
+df_house_price['availability'].apply(categorize_availability)
+# change the column name size to bedroom
+df_house_price = df_house_price.rename(columns={'size': 'bedroom'})
+# extract the numerical value from the 'size' column
+df_house_price['bedroom'] = df_house_price['bedroom'].str.extract(r'(\
+d+)').astype(float)
+# Drop rows with null values in the 'location' column
+df_house_price = df_house_price.dropna(subset=['location'])
+desc = df_house_price.describe()
+desc.to_csv("/Users/anamikac/Desktop/statistics.csv")
+df_house_price.isna().sum()
+# median of bedroom
+medianof_bedroom = df_house_price['bedroom'].median()
+# median of bath
+medianof_bath = df_house_price['bath'].median()
+# median of balcony
+medianof_balcony = df_house_price['balcony'].median()
+# Fill missing values in 'bedroom' with its median
+df_house_price['bedroom'] =
+df_house_price['bedroom'].fillna(round(medianof_bedroom))
+# Fill missing values in 'balcony' with its median
+df_house_price['balcony'] =
+df_house_price['balcony'].fillna(round(medianof_balcony))
+# Fill missing values in 'bath' column with its median
+df_house_price['bath'] = df_house_price['bath'].fillna(round(medianof_bath))
+# Replace missing values in 'PRICE PER SQUARE FEET'
+# First, fill NaN values based on the most granular grouping
+df_house_price['Price_per_squarefeet ($)'] =
+df_house_price.groupby(['property_scope', 'location', 'bedroom'])[
+'Price_per_squarefeet ($)'].transform(lambda x: x.fillna(round(x.median(), 2))
+if x.notna().any() else x)
+# Second, handle remaining NaN values at a broader grouping level
+df_house_price['Price_per_squarefeet ($)'] =
+df_house_price.groupby(['property_scope', 'location'])[
+'Price_per_squarefeet ($)'].transform(lambda x: x.fillna(round(x.median(), 2))
+if x.notna().any() else x)
+# Third, if any NaN values are still present, assign a global fallback (e.g., 0 or
+overall median)
+df_overall_median = round(df_house_price['Price_per_squarefeet ($)'].median(), 2)
+df_house_price['Price_per_squarefeet ($)'] = df_house_price['Price_per_squarefeet
+($)'].fillna(df_overall_median)
+df_house_price.isna().sum()
+df_house_price.describe()
+# examined the bath,balcony,bedroom with box plot to analyse the outliers
+columns = {'bedroom', 'bath', 'balcony', 'Price_per_squarefeet ($)',
+'total_squarefeet'}
+plt.figure(figsize=(12, 8))
+for i, column in enumerate(columns, 1):
+plt.subplot(2, 3, i)
+sns.boxplot(y=df_house_price[column])
+plt.title(f'Box plot of{column}')
+plt.ylabel(column)
+plt.tight_layout()
+plt.show()
+### Handling Outliers
+# Identify and exclude outliers using IQR
+Q1 = df_house_price[['bedroom', 'bath', 'balcony', 'total_squarefeet',
+'Price_per_squarefeet ($)']].quantile(0.25)
+Q3 = df_house_price[['bedroom', 'bath', 'balcony', 'total_squarefeet',
+'Price_per_squarefeet ($)']].quantile(0.75)
+IQR = Q3 - Q1
+# Define lower and upper bounds for non-outlier range for bath
+lower_bound_bath = Q1['bath'] - 1.5 * IQR['bath']
+upper_bound_bath = Q3['bath'] + 1.5 * IQR['bath']
+# Define lower and upper bounds for non-outlier range for bath
+lower_bound_balcony = Q1['balcony'] - 1.5 * IQR['balcony']
+upper_bound_balcony = Q3['balcony'] + 1.5 * IQR['balcony']
+# Define lower and upper bounds for non-outlier range for Price_per_squarefeet ($)
+lower_bound_Price_per_squarefeet = Q1['Price_per_squarefeet ($)'] - 1.5 *
+IQR['Price_per_squarefeet ($)']
+upper_bound_Price_per_squarefeet = Q3['Price_per_squarefeet ($)'] + 1.5 *
+IQR['Price_per_squarefeet ($)']
+# Define lower and upper bounds for non-outlier range for Bedroom
+lower_bound_Bedroom = Q1['bedroom'] - 1.5 * IQR['bedroom']
+upper_bound_Bedroom = Q3['bedroom'] + 1.5 * IQR['bedroom']
+# Define lower and upper bounds for non-outlier range for total_squarefeet
+lower_bound_total_squarefeet = Q1['total_squarefeet'] - 1.5 *
+IQR['total_squarefeet']
+upper_bound_total_squarefeet = Q3['total_squarefeet'] + 1.5 *
+IQR['total_squarefeet']
+# Create a filter for non-outliers in both columns
+non_outlier_filter = (
+(df_house_price['bath'] >= lower_bound_bath) & (df_house_price['bath'] <=
+upper_bound_bath) &
+(df_house_price['balcony'] >= lower_bound_balcony) &
+(df_house_price['balcony'] <= upper_bound_balcony) &
+(df_house_price['Price_per_squarefeet ($)'] >=
+lower_bound_Price_per_squarefeet) & (
+df_house_price['Price_per_squarefeet ($)'] <=
+upper_bound_Price_per_squarefeet) &
+(df_house_price['bedroom'] >= lower_bound_Bedroom) &
+(df_house_price['bedroom'] <= upper_bound_Bedroom) &
+(df_house_price['total_squarefeet'] >= lower_bound_total_squarefeet) & (
+df_house_price['total_squarefeet'] <=
+upper_bound_total_squarefeet)
+)
+# Apply the filter to drop outliers
+df_house_price_cleaned = df_house_price[non_outlier_filter]
+# Optionally, reset the index of the cleaned DataFrame
+df_house_price_cleaned.reset_index(drop=True, inplace=True)
+## box plot after removing outliers
+df_house_price_cleaned.describe()
+# ADDING CALCULATED COLUMN
+#Adding Calculated Column
+# Total_Price ($)
+df_house_price_cleaned['Total_Price ($)'] =
+df_house_price_cleaned['Price_per_squarefeet ($)'] *
+df_house_price_cleaned['total_squarefeet']
+df_house_price_cleaned['Price_per_Bedroom'] =
+round(df_house_price_cleaned['Total_Price ($)'] /
+df_house_price_cleaned['bedroom'], 2)
+print(df_house_price_cleaned.head(20))
+#CORRELATION MATRIX-
+encoded_data = df_house_price_cleaned.copy()
+for column in df_house_price_cleaned.select_dtypes(include=['object']).columns:
+encoded_data[column] =
+df_house_price_cleaned[column].astype('category').cat.codes
+# Compute the correlation matrix
+correlation_matrix = encoded_data.corr()
+correlation_matrix = encoded_data.corr()
+# Plot the correlation matrix as a heatmap
+plt.figure(figsize=(12, 8))
+sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt=".2f",
+linewidths=0.5)
+plt.title('Correlation Matrix', fontsize=16)
+plt.xticks(rotation=45, ha='right', fontsize=10)
+plt.yticks(fontsize=10)
+plt.tight_layout()
+plt.show()
+# writing to a csv file
+file_path = '/Users/anamikac/Desktop/FINAL_CLEANED.csv'
+df_house_price_cleaned.to_csv(file_path, index=False)
+print(f"The data has been saved to '{file_path}'.")
+label_encoder = LabelEncoder()
+categorical_columns = ['property_scope', 'location', 'Renovation needed', 'BER']
+# Identify categorical columns
+categorical_columns =
+df_house_price_cleaned.select_dtypes(include=['object']).columns
+print("\nCategorical Columns:")
+print(categorical_columns)
+# Encode categorical columns using Label Encoding
+label_encoders = {}
+for col in categorical_columns:
+le = LabelEncoder()
+df_house_price_cleaned[col] = le.fit_transform(df_house_price_cleaned[col])
+label_encoders[col] = le # Save the encoder for future use
+print("Dataset Preview:")
+print(df_house_price_cleaned.head())
+# Save the transformed dataset
+df_house_price_cleaned.head(10)
+data = df_house_price_cleaned
+print(df_house_price_cleaned.columns)
+print(df_house_price_cleaned.head())
+print(df_house_price_cleaned.columns)
+#Adding Calculated Column
+# Total_Price ($)
+df_house_price_cleaned['Total_Price ($)'] =
+df_house_price_cleaned['Price_per_squarefeet ($)'] *
+df_house_price_cleaned['total_squarefeet']
+#Price_per_Bedroom
+df_house_price_cleaned['Price_per_Bedroom'] =
+round(df_house_price_cleaned['Total_Price ($)'] /
+df_house_price_cleaned['bedroom'], 2)
+print(df_house_price_cleaned.head(20))
+# SVM
+# Define features (X) and target (y)
+X = data.drop('buying or not buying',axis=1) # Use all columns except 'buying or
+not buying' as features
+y = data['buying or not buying'] # 'buying or not buying' as the target
+# Train-test split (80% training, 20% testing)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2,
+random_state=42)
+# Feature Scaling (important for SVM)
+scaler = StandardScaler()
+# Fit and transform the training data, then transform the test data
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+# Initialize the SVM model with a rbf kernel
+model = SVC(kernel='rbf', random_state=42)
+# Train the SVM model on the scaled data
+model.fit(X_train_scaled, y_train)
+# Predict on the test data
+y_pred = model.predict(X_test_scaled)
+print(X_train.columns)
+# Evaluate the model's performance
+accuracy_SVM = accuracy_score(y_test, y_pred)
+print(f"Accuracy_SVM: {accuracy_SVM * 100:.2f}%")
+# Print classification report for more detailed evaluation (precision, recall, F1-
+score)
+print(classification_report(y_test, y_pred))
+# Random Forest Regressor for regression task
+# Define the features (X) and target (y)
+X = df_house_price_cleaned.drop(columns=['buying or not buying']) # Drop the
+target variable
+y = df_house_price_cleaned['buying or not buying'] # Target variable
+# Encode the target variable if it's categorical
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(y)
+# Train-test split (80% training, 20% testing)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2,
+random_state=42)
+# Build the Random Forest Classifier
+rf_model = RandomForestClassifier(random_state=42, n_estimators=100) # Use 100
+trees in the forest
+rf_model.fit(X_train, y_train)
+# Make predictions
+y_pred = rf_model.predict(X_test)
+# Evaluate the model
+accuracy_RandomForest = accuracy_score(y_test, y_pred)
+print("Accuracy_RandomForest:", accuracy_RandomForest)
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+print(confusion_matrix(y_test, y_pred))
+# Feature Importance (Optional)
+feature_importances = pd.DataFrame({
+'Feature': X.columns,
+'Importance': rf_model.feature_importances_
+}).sort_values(by='Importance', ascending=False)
+print("\nFeature Importances:")
+print(feature_importances)
+# accuracy improvement
+# Define the features (X) and target (y)
+X = df_house_price_cleaned.drop(columns=['buying or not buying']) # Independent
+variables
+y = df_house_price_cleaned['buying or not buying'] # Target variable
+# Encode the target variable if it's categorical
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(y)
+# Standardize the features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2,
+random_state=42)
+### Step 1: Hyperparameter Tuning for Random Forest ###
+param_grid = {
+'n_estimators': [50, 100, 200],
+'max_depth': [10, 20, None],
+'min_samples_split': [2, 5, 10],
+'min_samples_leaf': [1, 2, 4],
+'max_features': ['sqrt', 'log2']
+}
+rf = RandomForestClassifier(random_state=42)
+grid_search = GridSearchCV(rf, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+grid_search.fit(X_train, y_train)
+# Get the best hyperparameters and model
+best_rf = grid_search.best_estimator_
+print("Best Hyperparameters:", grid_search.best_params_)
+# Evaluate the tuned Random Forest
+y_pred = best_rf.predict(X_test)
+print("\nRandom Forest (Tuned) Accuracy:", accuracy_score(y_test, y_pred))
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+### Step 2: Feature Selection with Lasso ###
+lasso = LassoCV(cv=5, random_state=42)
+lasso.fit(X_train, y_train)
+# Identify important features
+lasso_coef = pd.Series(lasso.coef_,
+index=df_house_price_cleaned.drop(columns=['buying or not buying']).columns)
+important_features = lasso_coef[lasso_coef != 0].index.tolist()
+print("\nSelected Features by Lasso:", important_features)
+# Train a Random Forest using selected features
+X_train_selected = X_train[:, lasso_coef != 0]
+X_test_selected = X_test[:, lasso_coef != 0]
+best_rf_selected = RandomForestClassifier(random_state=42,
+**grid_search.best_params_)
+best_rf_selected.fit(X_train_selected, y_train)
+y_pred_selected = best_rf_selected.predict(X_test_selected)
+print("\nRandom Forest (Lasso-Selected Features) Accuracy:", accuracy_score(y_test,
+y_pred_selected))
+### Step 3: Dimensionality Reduction with PCA ###
+pca = PCA(n_components=0.95) # Retain 95% of the variance
+X_train_pca = pca.fit_transform(X_train)
+X_test_pca = pca.transform(X_test)
+rf_pca = RandomForestClassifier(random_state=42, **grid_search.best_params_)
+rf_pca.fit(X_train_pca, y_train)
+y_pred_pca = rf_pca.predict(X_test_pca)
+print("\nRandom Forest (PCA) Accuracy:", accuracy_score(y_test, y_pred_pca))
+### Step 4: Ensemble Methods (Voting Classifier) ###
+lr = LogisticRegression(random_state=42)
+rf = RandomForestClassifier(random_state=42, **grid_search.best_params_)
+knn = KNeighborsClassifier(n_neighbors=5)
+voting_clf = VotingClassifier(estimators=[
+('lr', lr),
+('rf', rf),
+('knn', knn)
+], voting='hard')
+voting_clf.fit(X_train, y_train)
+y_pred_voting = voting_clf.predict(X_test)
+print("\nVoting Classifier Accuracy:", accuracy_score(y_test, y_pred_voting))
+### Step 5: Cross-Validation for Model Evaluation ###
+cv_scores = cross_val_score(best_rf, X_scaled, y, cv=10, scoring='accuracy')
+print("\nCross-Validation Accuracy for Random Forest:", np.mean(cv_scores))
+print(classification_report(y_test, y_pred))
+# decision tree
+dt_model = DecisionTreeClassifier(random_state=42, max_depth=5) # Set max_depth to
+prevent overfitting
+dt_model.fit(X_train, y_train)
+# Make predictions
+y_pred = dt_model.predict(X_test)
+# Evaluate the model
+accuracy = accuracy_score(y_test, y_pred)
+print("Accuracy_DecisionTree:", accuracy)
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+accuracy_decisiontree = accuracy_score(y_test, y_pred)
+# Feature Importance (Optional)
+feature_importances = pd.DataFrame({
+'Feature': X.columns,
+'Importance': dt_model.feature_importances_
+}).sort_values(by='Importance', ascending=False)
+print("\nFeature Importances:")
+print(feature_importances)
+# improving accuracy of decision tree
+# Define the features (X) and target (y)
+X = df_house_price_cleaned.drop(columns=['buying or not buying']) # Drop the
+target variable
+y = df_house_price_cleaned['buying or not buying'] # Target variable
+# Encode the target variable if it's categorical
+from sklearn.preprocessing import LabelEncoder
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(y)
+# Train-test split (80% training, 20% testing)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2,
+random_state=42)
+# Hyperparameter Tuning for Decision Tree
+param_grid = {
+'max_depth': [5, 10, 20, None],
+'min_samples_split': [2, 5, 10],
+'min_samples_leaf': [1, 2, 4],
+'criterion': ['gini', 'entropy']
+}
+dt = DecisionTreeClassifier(random_state=42)
+grid_search_dt = GridSearchCV(dt, param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+grid_search_dt.fit(X_train, y_train)
+# Best Decision Tree Model
+best_dt = grid_search_dt.best_estimator_
+print("Best Hyperparameters for Decision Tree:", grid_search_dt.best_params_)
+# Evaluate the tuned Decision Tree
+y_pred_dt = best_dt.predict(X_test)
+print("\nDecision Tree (Tuned) Accuracy:", accuracy_score(y_test, y_pred_dt))
+print("\nClassification Report:\n", classification_report(y_test, y_pred_dt))
+# Cross-Validation for Decision Tree
+cv_scores_dt = cross_val_score(best_dt, X_scaled, y, cv=10, scoring='accuracy')
+print("\nCross-Validation Accuracy for Decision Tree:", cv_scores_dt.mean())
+# LOGISTIC REGRESSION
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+# Building the Logistic Regression model
+model = LogisticRegression(random_state=42, max_iter=1000) # max_iter to ensure
+convergence
+model.fit(X_train, y_train)
+# Making predictions
+y_pred = model.predict(X_test)
+# Evaluating the model
+accuracy_logistic = accuracy_score(y_test, y_pred)
+print("Accuracy_Logic regression:", accuracy)
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+# KNN
+# Define the features (X) and target (y)
+X = df_house_price_cleaned.drop(columns=['buying or not buying']) # Drop the
+target variable
+y = df_house_price_cleaned['buying or not buying'] # Target variable
+# Encode the target variable if it's categorical
+label_encoder = LabelEncoder()
+y = label_encoder.fit_transform(y)
+# Standardize the features
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+# Train-test split (80% training, 20% testing)
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2,
+random_state=42)
+# Build the KNN Classifier
+knn_model = KNeighborsClassifier(n_neighbors=5) # Use 5 neighbors by default
+knn_model.fit(X_train, y_train)
+# Make predictions
+y_pred = knn_model.predict(X_test)
+# Evaluate the model
+accuracy_KNN = accuracy_score(y_test, y_pred)
+print("Accuracy_KNN:", accuracy_KNN)
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+# IMPROVING ACCURACY OF KNN
+# Hyperparameter Tuning for KNN
+param_grid = {
+'n_neighbors': range(1, 21),
+'weights': ['uniform', 'distance'],
+'metric': ['euclidean', 'manhattan', 'minkowski']
+}
+knn = KNeighborsClassifier()
+grid_search_knn = GridSearchCV(knn, param_grid, cv=5, scoring='accuracy', n_jobs=-
+1)
+grid_search_knn.fit(X_train, y_train)
+# Best KNN Model
+best_knn = grid_search_knn.best_estimator_
+print("Best Hyperparameters for KNN:", grid_search_knn.best_params_)
+# Evaluate the tuned KNN
+y_pred_knn = best_knn.predict(X_test)
+print("\nKNN (Tuned) Accuracy:", accuracy_score(y_test, y_pred_knn))
+print("\nClassification Report:\n", classification_report(y_test, y_pred_knn))
+# Cross-Validation for KNN
+cv_scores_knn = cross_val_score(best_knn, X_scaled, y, cv=10, scoring='accuracy')
+print("\nCross-Validation Accuracy for KNN:", cv_scores_knn.mean())
+print(classification_report(y_test, y_pred))
+data.to_csv('/Users/anamikac/Desktop/encoded.csv')
+# Models to compare
+models = {
+'SVM': SVC(random_state=42),
+'Random Forest': RandomForestClassifier(random_state=42),
+'Decision Tree': DecisionTreeClassifier(random_state=42),
+'Logistic Regression': LogisticRegression(random_state=42, max_iter=1000),
+'KNN': KNeighborsClassifier(n_neighbors=5)
+}
+# Dictionary to store accuracy results
+accuracy_results = {}
+# Loop through each model, train it, and calculate accuracy
+for model_name, model in models.items():
+# Fit the model
+model.fit(X_train_scaled, y_train)
+# Make predictions
+y_pred = model.predict(X_test_scaled)
+# Calculate accuracy
+accuracy = accuracy_score(y_test, y_pred)
+# Store the result
+accuracy_results[model_name] = accuracy
+# Print the results
+for model_name, accuracy in accuracy_results.items():
+print(f"{model_name} Accuracy: {accuracy * 100:.2f}%")
+# Optional: You can visualize the results using a bar plot
+import matplotlib.pyplot as plt
+# Plot the accuracy comparison
+plt.figure(figsize=(10, 6))
+accuracy_percentage = {k: v * 100 for k, v in accuracy_results.items()}
+plt.bar(accuracy_percentage.keys(), accuracy_percentage.values(), color=['blue',
+'green', 'red', 'purple', 'orange'])
+plt.xlabel('Model')
+plt.ylabel('Accuracy (%)')
+plt.title('Model Accuracy Comparison (Baseline)')
+plt.xticks(rotation=45)
+plt.tight_layout()
+plt.show()
