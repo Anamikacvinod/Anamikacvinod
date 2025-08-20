@@ -4,7 +4,7 @@ Welcome to my GitHub repository! I am an MSc Business Analytics student and ACCA
 
 ## 📂 Projects
 
-### 1. Exchange Rate Forecasting (INR/USD)
+### 1. Exchange Rate Forecasting (INR/USD)https://github.com/Anamikacvinod/PPP-ExchangeRate-Forecasting
 - Developed an ARIMA(2,1,1) model to predict monthly exchange rates from 2013–2024 with <1% forecast error.
 - Validated model performance using AIC/BIC scoring and OLS diagnostics.
 - Tools: Python, ARIMA, Excel.
